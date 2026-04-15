@@ -1,0 +1,229 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using BaseExchange.OrderFlow.UI.Models
+@using BaseExchange.OrderFlow.UI.Services
+@inject OrderApiClient Api
+@inject ExposureState State
+
+<div class="container">
+
+  
+    <div class="container-dashboard">
+
+        <!-- ORDER PANEL -->
+        <div class="card">
+            <h3>🧾 New Order</h3>
+
+            @if (!string.IsNullOrWhiteSpace(errorMessage))
+            {
+                <div class="alert-error">
+                    @errorMessage
+                </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(successMessage))
+            {
+                <div class="alert-success">
+                    @successMessage
+                </div>
+            }
+
+            <label for="symbol">Symbol</label>
+            <select id="symbol" @bind="order.Symbol">
+                <option value="PETR4">PETR4</option>
+                <option value="VALE3">VALE3</option>
+                <option value="VIIA4">VIIA4</option>
+            </select>
+
+            <label for="side">Side</label>
+            <select id="side" @bind="order.Side">
+                <option value="1">Buy</option>
+                <option value="2">Sell</option>
+            </select>
+
+            <label for="quantity">Quantity (max 99,999)</label>
+            <input id="quantity" type="number"
+                   @bind="order.Quantity"
+                   min="1" max="99999" />
+
+            <label for="price">Price</label>
+            <input id="price" type="number"
+                   step="0.01"
+                   @bind="order.Price" />
+
+            <button type="button" @onclick="SendOrder" disabled="@isLoading">
+                @(isLoading ? "Sending..." : "Send Order")
+            </button>
+        </div>
+
+        <!-- EXPOSURE PANEL -->
+        <div class="card">
+            <h3>📊 Exposure Panel</h3>
+
+            @if (!State.Data.Any())
+            {
+                <p>Loading data...</p>
+            }
+            else
+            {
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Exposure</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in State.Data.OrderByDescending(x => Math.Abs(x.Exposure)))
+                        {
+                            <tr class="@_rowEffects.GetValueOrDefault(item.Symbol)">
+                                <td>
+                                    <strong>@item.Symbol</strong>
+                                </td>
+
+                                <td>
+                                    <span class="badge @(item.Exposure >= 0 ? "buy" : "sell")">
+                                        @(item.Exposure >= 0 ? "BUY" : "SELL")
+                                    </span>
+                                </td>
+
+                                <td class="@GetExposureClass(item.Exposure)">
+                                    @item.Exposure.ToString("N2")
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+
+    </div>
+    
+
+</div>
+
+
+@code {
+    private OrderRequest order = new()
+    {
+        Symbol = "PETR4",
+        Quantity = 1,
+        Price = 1
+    };
+
+
+private bool isLoading = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    private Dictionary<string, decimal> _previousExposure = new();
+    private Dictionary<string, string> _rowEffects = new();
+
+    private CancellationTokenSource _cts = new();
+    private bool _isFetching = false;
+
+    protected override void OnInitialized()
+    {
+        State.OnChange += StateHasChanged;
+        _ = StartPolling(_cts.Token);
+    }
+
+    private async Task SendOrder()
+    {
+        isLoading = true;
+        errorMessage = null;
+        successMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            await Api.SendOrder(order);
+
+            successMessage = "Order sent successfully!";
+            order = new OrderRequest { Quantity = 1, Price = 1 };
+
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(3000);
+                successMessage = null;
+                await InvokeAsync(StateHasChanged);
+            });
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize<ApiError>(ex.Message);
+
+                errorMessage = parsed?.message ?? "Failed to send order";
+            }
+            catch
+            {
+                errorMessage = "Failed to send order";
+            }
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private string GetExposureClass(decimal value)
+    {
+        return value >= 0 ? "positive" : "negative";
+    }
+
+    private async Task StartPolling(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            if (!_isFetching)
+            {
+                _isFetching = true;
+
+                try
+                {
+                    var data = await Api.GetExposure();
+
+                    foreach (var item in data)
+                    {
+                        if (_previousExposure.TryGetValue(item.Symbol, out var oldValue))
+                        {
+                            if (item.Exposure > oldValue)
+                                _rowEffects[item.Symbol] = "flash-up";
+                            else if (item.Exposure < oldValue)
+                                _rowEffects[item.Symbol] = "flash-down";
+                        }
+
+                        _previousExposure[item.Symbol] = item.Exposure;
+                    }
+
+                    State.Set(data);
+
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(500);
+                        _rowEffects.Clear();
+                        await InvokeAsync(StateHasChanged);
+                    });
+                }
+                finally
+                {
+                    _isFetching = false;
+                }
+            }
+
+            await Task.Delay(1000, token);
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+        State.OnChange -= StateHasChanged;
+    }
+
+
+}
