@@ -24,8 +24,6 @@ public class Program
 
             ConfigureRequestPipeline(app);
 
-            InitializeServices(app);
-
             Log.Information("Application starting");
 
             app.Run();
@@ -87,21 +85,5 @@ public class Program
 
         app.MapControllers();
         app.MapHealthChecks("/health");
-    }
-
-    private static void InitializeServices(WebApplication app)
-    {
-        using var scope = app.Services.CreateScope();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-
-        try
-        {
-            scope.ServiceProvider.GetRequiredService<IFixOrderSender>();
-            logger.LogInformation("FIX client initialized");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to initialize FIX client");
-        }
     }
 }

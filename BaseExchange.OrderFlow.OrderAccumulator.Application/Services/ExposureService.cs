@@ -4,10 +4,17 @@ using System.Collections.Concurrent;
 
 namespace BaseExchange.OrderFlow.OrderAccumulator.Application.Services;
 
-public class ExposureService
+/// <summary>
+/// Implementação de rastreamento de exposição
+/// Mantém dicionário thread-safe de exposições por símbolo
+/// </summary>
+public class ExposureService : IExposureService
 {
     private readonly ConcurrentDictionary<string, decimal> _exposure = new();
 
+    /// <summary>
+    /// Processa uma ordem e atualiza exposição
+    /// </summary>
     public void ProcessOrder(Order order)
     {
         ArgumentNullException.ThrowIfNull(order);
@@ -24,6 +31,9 @@ public class ExposureService
         );
     }
 
+    /// <summary>
+    /// Retorna exposição para um símbolo
+    /// </summary>
     public decimal GetExposure(string symbol)
     {
         ArgumentNullException.ThrowIfNull(symbol);
@@ -33,6 +43,9 @@ public class ExposureService
             : 0;
     }
 
+    /// <summary>
+    /// Retorna todas as exposições
+    /// </summary>
     public IReadOnlyDictionary<string, decimal> GetAll()
     {
         return _exposure.ToDictionary(x => x.Key, x => x.Value);

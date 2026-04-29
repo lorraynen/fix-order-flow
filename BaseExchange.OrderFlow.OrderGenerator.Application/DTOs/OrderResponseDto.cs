@@ -4,7 +4,7 @@ namespace BaseExchange.OrderFlow.OrderGenerator.Application.DTOs;
 
 public record OrderResponseDto(
     string Symbol,
-    SideEnum Side,
+    SideEnum? Side,
     int Quantity,
     decimal Price,
     string Status,

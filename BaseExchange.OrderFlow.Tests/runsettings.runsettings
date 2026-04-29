@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <MaxCpuCount>0</MaxCpuCount>
+    <ResultsDirectory>.\TestResults</ResultsDirectory>
+    <CollectSourceInformation>true</CollectSourceInformation>
+  </RunConfiguration>
+
+  <CodeCoverage>
+    <ModulePaths>
+      <ModulePath>.*BaseExchange.OrderFlow.Domain.*</ModulePath>
+      <ModulePath>.*BaseExchange.OrderFlow.OrderGenerator.Application.*</ModulePath>
+      <ModulePath>.*BaseExchange.OrderFlow.Infrastructure.*</ModulePath>
+    </ModulePaths>
+  </CodeCoverage>
+
+  <LoggerRunSettings>
+    <Verbosity>Normal</Verbosity>
+  </LoggerRunSettings>
+</RunSettings>

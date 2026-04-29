@@ -1,7 +1,6 @@
 ﻿using BaseExchange.OrderFlow.Domain.Entities;
 using BaseExchange.OrderFlow.Domain.Enums;
 using BaseExchange.OrderFlow.OrderGenerator.Application.Exceptions;
-using BaseExchange.OrderFlow.OrderGenerator.Application.Interfaces;
 using Microsoft.Extensions.Logging;
 using QuickFix;
 using QuickFix.Fields;
@@ -11,7 +10,12 @@ using QuickFix.Transport;
 
 namespace BaseExchange.OrderFlow.Infrastructure.Fix;
 
-public class FixClient : IFixOrderSender, IFixConnection
+/// <summary>
+/// Coordena a conexão e envio de ordens FIX
+/// Não implementa interfaces - é uma classe interna de infraestrutura
+/// Usada por FixConnection e FixOrderSender
+/// </summary>
+public class FixClient
 {
     private readonly ILogger<FixClient> _logger;
     private readonly FixApplication _app;
@@ -19,9 +23,6 @@ public class FixClient : IFixOrderSender, IFixConnection
 
     private SocketInitiator? _initiator;
     private bool _started = false;
-
-    private const int MaxRetries = 10;
-    private const int RetryDelayMs = 500;
 
     public FixClient(
         FixApplication app,
@@ -35,26 +36,22 @@ public class FixClient : IFixOrderSender, IFixConnection
         Start();
     }
 
-    public async Task EnsureConnectedAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Verifica se há uma sessão FIX ativa
+    /// </summary>
+    public bool IsConnected()
     {
-        int retries = 0;
-
-        while (!IsConnected() && retries < MaxRetries)
-        {
-            _logger.LogWarning("Waiting FIX connection... attempt {Retry}", retries + 1);
-
-            await Task.Delay(RetryDelayMs, cancellationToken);
-            retries++;
-        }
-
-        if (!IsConnected())
-        {
-            throw new FixConnectionException("FIX not connected after retries");
-        }
+        return _app.CurrentSession != null;
     }
 
+    /// <summary>
+    /// Envia uma ordem ao servidor FIX
+    /// Método interno - não é público para exterior
+    /// </summary>
     public void SendOrder(Order order)
     {
+        ArgumentNullException.ThrowIfNull(order);
+
         if (_app.CurrentSession == null)
             throw new FixConnectionException("FIX not connected");
 
@@ -72,18 +69,13 @@ public class FixClient : IFixOrderSender, IFixConnection
         Session.SendToTarget(message, _app.CurrentSession);
 
         _logger.LogInformation(
-            "Order sent {Symbol} {Side} {Quantity} @ {Price}",
-            order.Symbol,
-            order.Side,
-            order.Quantity,
-            order.Price);
+            "Order sent {Symbol} {Side} {Quantity}@{Price}",
+            order.Symbol, order.Side, order.Quantity, order.Price);
     }
 
-    public bool IsConnected()
-    {
-        return _app.CurrentSession != null;
-    }
-
+    /// <summary>
+    /// Inicia a conexão FIX
+    /// </summary>
     private void Start()
     {
         if (_started)
@@ -96,15 +88,16 @@ public class FixClient : IFixOrderSender, IFixConnection
             var path = _options.ConfigPath;
 
             if (!File.Exists(path))
+            {
+                _logger.LogError("FIX config file not found: {Path}", path);
                 throw new FileNotFoundException("fix.cfg not found", path);
+            }
 
             var settings = new SessionSettings(path);
-
             var storeFactory = new FileStoreFactory(settings);
             var logFactory = new ScreenLogFactory(settings);
 
             _initiator = new SocketInitiator(_app, storeFactory, settings, logFactory);
-
             _initiator.Start();
 
             _started = true;
@@ -116,5 +109,31 @@ public class FixClient : IFixOrderSender, IFixConnection
             _logger.LogError(ex, "Error starting FIX client");
             throw;
         }
+    }
+
+    /// <summary>
+    /// Para a conexão FIX
+    /// </summary>
+    public void Stop()
+    {
+        try
+        {
+            _initiator?.Stop();
+            _started = false;
+            _logger.LogInformation("FIX client stopped");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error stopping FIX client");
+        }
+    }
+
+    /// <summary>
+    /// Implementa IDisposable para limpeza de recursos
+    /// </summary>
+    public void Dispose()
+    {
+        Stop();
+        _initiator?.Dispose();
     }
 }

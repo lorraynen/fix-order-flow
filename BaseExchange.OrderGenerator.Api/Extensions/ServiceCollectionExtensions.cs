@@ -1,15 +1,21 @@
-using BaseExchange.OrderFlow.Infrastructure.Fix;
+﻿using BaseExchange.OrderFlow.Infrastructure.Fix;
 using BaseExchange.OrderFlow.Infrastructure.Fix.HealthChecks;
 using BaseExchange.OrderFlow.OrderGenerator.Application.Interfaces;
 using BaseExchange.OrderFlow.OrderGenerator.Application.Services;
 using BaseExchange.OrderFlow.OrderGenerator.Application.Validators;
 using BaseExchange.OrderFlow.Api.Client;
+using BaseExchange.OrderFlow.Infrastructure.Resilience;
+using BaseExchange.OrderFlow.OrderAccumulator.Application.Services;
 using FluentValidation;
 using Microsoft.Extensions.Configuration;
 using Microsoft.OpenApi.Models;
 
 namespace BaseExchange.OrderGenerator.Api.Extensions;
 
+/// <summary>
+/// Extension methods para IServiceCollection
+/// Implementa SOLID: Centraliza registro de serviços
+/// </summary>
 public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApiServices(this IServiceCollection services)
@@ -24,42 +30,33 @@ public static class ServiceCollectionExtensions
             {
                 Title = "Order Generator API",
                 Version = "v1",
-                Description = "API for sending orders via FIX"
+                Description = "REST API for FIX order generation"
             });
-
-            var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
-
-            if (File.Exists(xmlPath))
-            {
-                config.IncludeXmlComments(xmlPath);
-            }
         });
 
         return services;
     }
 
-    public static IServiceCollection AddFixServices(this IServiceCollection services, IConfiguration configuration)
+    public static IServiceCollection AddFixServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
     {
-        services.AddSingleton<FixApplication>();
-
+        // 1. Configuração do FIX
         var configFile = configuration["FixClient:ConfigFile"] ?? "fix.cfg";
-
         services.AddSingleton(new FixSettingsOptions
         {
             ConfigPath = Path.Combine(AppContext.BaseDirectory, configFile)
         });
 
-        // Single instance shared across both contracts (sender + connection state).
-        services.AddSingleton<FixClient>();
-        services.AddSingleton<IFixOrderSender>(sp => sp.GetRequiredService<FixClient>());
-        services.AddSingleton<IFixConnection>(sp => sp.GetRequiredService<FixClient>());
-        services.AddHttpClient<ExposureApiClient>(client =>
-        {
-            client.BaseAddress = new Uri("http://localhost:5000");
-        });
+        // 2. FixApplication - necessário para FixClient
+        services.AddSingleton<FixApplication>();
 
-        services.AddHealthChecks().AddCheck<FixClientHealthCheck>("fix");
+        // 3. Cliente FIX (coordenador interno)
+        services.AddSingleton<FixClient>();
+
+        // 4. Serviços FIX
+        services.AddSingleton<IFixConnection, FixConnectionImpl>();
+        services.AddSingleton<IFixOrderSender, FixOrderSender>();
 
         return services;
     }
@@ -67,12 +64,14 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         services.AddScoped<IOrderService, OrderService>();
+        services.AddScoped<IExposureService, ExposureService>();
+
         return services;
     }
 
     public static IServiceCollection AddValidators(this IServiceCollection services)
     {
-        services.AddValidatorsFromAssemblyContaining<CreateOrderValidator>();
+        services.AddValidatorsFromAssemblyContaining(typeof(CreateOrderValidator));
         return services;
     }
 
@@ -80,10 +79,9 @@ public static class ServiceCollectionExtensions
     {
         services.AddCors(options =>
         {
-            options.AddPolicy("AllowAll", policy =>
+            options.AddPolicy("AllowAll", builder =>
             {
-                policy
-                    .AllowAnyOrigin()
+                builder.AllowAnyOrigin()
                     .AllowAnyMethod()
                     .AllowAnyHeader();
             });
